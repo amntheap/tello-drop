@@ -1,0 +1,8 @@
+# 3D models and print files
+*.stl
+*.3mf
+*.gcode
+*.zip
+*.png
+*.jpg
+smart-box*

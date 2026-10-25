@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Tello Payload Release</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --primary-blue: #007aff;
+            --danger-red: #ff3b30;
+            --danger-glow: rgba(255, 59, 48, 0.45);
+            --safe-green: #34c759;
+            --text-main: #f0f6fc;
+            --text-sub: #8b949e;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 24px 16px 36px 16px;
+        }
+
+        .header {
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .header p {
+            font-size: 13px;
+            color: var(--text-sub);
+            margin-top: 4px;
+        }
+
+        /* Status Badge */
+        .status-container {
+            margin: 18px 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--card-bg);
+            border: 1px solid #30363d;
+            padding: 8px 18px;
+            border-radius: 999px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--danger-red);
+            box-shadow: 0 0 8px var(--danger-red);
+            transition: all 0.3s ease;
+        }
+
+        .dot.connected {
+            background-color: var(--safe-green);
+            box-shadow: 0 0 10px var(--safe-green);
+        }
+
+        /* Main Drop Trigger */
+        .drop-zone {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            max-width: 340px;
+        }
+
+        .btn-drop {
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 35%, #ff453a, #b01b1b);
+            border: 5px solid #ff7b72;
+            color: white;
+            font-size: 32px;
+            font-weight: 900;
+            letter-spacing: 2px;
+            box-shadow: 0 10px 30px var(--danger-glow);
+            cursor: pointer;
+            transition: all 0.15s ease-in-out;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn-drop span.sub {
+            font-size: 12px;
+            letter-spacing: 1px;
+            opacity: 0.85;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .btn-drop:active:not(:disabled) {
+            transform: scale(0.92);
+            box-shadow: 0 4px 15px var(--danger-glow);
+        }
+
+        .btn-drop:disabled {
+            background: #21262d;
+            border-color: #30363d;
+            box-shadow: none;
+            color: #484f58;
+            cursor: not-allowed;
+        }
+
+        /* Action Buttons */
+        .controls-card {
+            width: 100%;
+            max-width: 340px;
+            background-color: var(--card-bg);
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .btn-connect {
+            background-color: var(--primary-blue);
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn-connect:active {
+            opacity: 0.8;
+        }
+
+        .test-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-secondary {
+            flex: 1;
+            background: #21262d;
+            color: var(--text-main);
+            border: 1px solid #30363d;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .btn-secondary:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .log-box {
+            font-family: monospace;
+            font-size: 11px;
+            color: #8b949e;
+            text-align: center;
+            min-height: 18px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <div class="header">
+        <h1>Tello Drop Controller</h1>
+        <p>PZ-15320 &bull; ESP32-S3 BLE</p>
+        <div class="status-container">
+            <div class="dot" id="statusDot"></div>
+            <span id="statusText">Disconnected</span>
+        </div>
+    </div>
+
+    <!-- Drop Button -->
+    <div class="drop-zone">
+        <button class="btn-drop" id="dropBtn" onclick="handleDrop()" disabled>
+            <span>DROP</span>
+            <span class="sub">PAYLOAD</span>
+        </button>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-card">
+        <button class="btn-connect" id="connectBtn" onclick="toggleConnection()">Connect Bluetooth</button>
+        
+        <div class="test-row">
+            <button class="btn-secondary" id="testBtn" onclick="sendCommand('TEST')" disabled>Test Open</button>
+            <button class="btn-secondary" id="lockBtn" onclick="sendCommand('LOCK')" disabled>Force Lock</button>
+        </div>
+
+        <div class="log-box" id="logBox">Open in Bluefy browser on iOS</div>
+    </div>
+
+    <script>
+        const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+        const TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+        let bleDevice = null;
+        let rxCharacteristic = null;
+        let txCharacteristic = null;
+
+        const statusDot = document.getElementById("statusDot");
+        const statusText = document.getElementById("statusText");
+        const dropBtn = document.getElementById("dropBtn");
+        const connectBtn = document.getElementById("connectBtn");
+        const testBtn = document.getElementById("testBtn");
+        const lockBtn = document.getElementById("lockBtn");
+        const logBox = document.getElementById("logBox");
+
+        // Simple audio beeps for feedback without looking at screen
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playBeep(freq = 880, duration = 0.15) {
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = "sine";
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch(e) {}
+        }
+
+        async function toggleConnection() {
+            if (bleDevice && bleDevice.gatt.connected) {
+                bleDevice.gatt.disconnect();
+                return;
+            }
+
+            try {
+                logBox.innerText = "Requesting Bluetooth device...";
+                
+                bleDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: "TelloDropSystem" }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+                logBox.innerText = "Connecting to GATT Server...";
+                const server = await bleDevice.gatt.connect();
+
+                logBox.innerText = "Discovering services...";
+                const service = await server.getPrimaryService(SERVICE_UUID);
+
+                rxCharacteristic = await service.getCharacteristic(RX_CHAR_UUID);
+                
+                try {
+                    txCharacteristic = await service.getCharacteristic(TX_CHAR_UUID);
+                    await txCharacteristic.startNotifications();
+                    txCharacteristic.addEventListener('characteristicvaluechanged', (e) => {
+                        const val = new TextDecoder().decode(e.target.value);
+                        logBox.innerText = "ESP32: " + val.trim();
+                    });
+                } catch(err) {
+                    console.log("TX notify not available:", err);
+                }
+
+                // Connected state
+                statusDot.classList.add("connected");
+                statusText.innerText = "Ready to Drop";
+                statusText.style.color = "var(--safe-green)";
+                connectBtn.innerText = "Disconnect";
+                connectBtn.style.backgroundColor = "#30363d";
+                dropBtn.disabled = false;
+                testBtn.disabled = false;
+                lockBtn.disabled = false;
+                logBox.innerText = "Connected: " + bleDevice.name;
+
+                playBeep(1200, 0.1);
+                setTimeout(() => playBeep(1600, 0.15), 120);
+
+            } catch (error) {
+                console.error("BLE Error:", error);
+                logBox.innerText = "Error: " + error.message;
+                onDisconnected();
+            }
+        }
+
+        function onDisconnected() {
+            statusDot.classList.remove("connected");
+            statusText.innerText = "Disconnected";
+            statusText.style.color = "var(--text-sub)";
+            connectBtn.innerText = "Connect Bluetooth";
+            connectBtn.style.backgroundColor = "var(--primary-blue)";
+            dropBtn.disabled = true;
+            testBtn.disabled = true;
+            lockBtn.disabled = true;
+            logBox.innerText = "Bluetooth disconnected.";
+            playBeep(400, 0.2);
+        }
+
+        async function sendCommand(cmd) {
+            if (!rxCharacteristic) return;
+            try {
+                const encoder = new TextEncoder();
+                await rxCharacteristic.writeValue(encoder.encode(cmd + "\n"));
+                logBox.innerText = "Sent: " + cmd;
+                playBeep(900, 0.08);
+            } catch (err) {
+                logBox.innerText = "Send failed: " + err.message;
+            }
+        }
+
+        async function handleDrop() {
+            playBeep(1800, 0.25);
+            logBox.innerText = "DROPPING...";
+            await sendCommand("DROP");
+        }
+    </script>
+</body>
+</html>
