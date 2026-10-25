@@ -9,11 +9,16 @@
 // PIN & SERVO CONFIGURATION
 // ==========================================
 #define SERVO_PIN        4   // GPIO 4 for PZ-15320 PWM signal
-#define ONBOARD_LED_PIN  8   // Built-in LED on ESP32-S3 Super Mini (usually GPIO 8)
+#define ONBOARD_LED_PIN  8   // Built-in LED on ESP32-S3 Super Mini
 
-// Adjust these angles based on your physical latch mechanism:
-#define SERVO_LOCK_POS   10  // Degrees: Pin inserted (Holding payload)
-#define SERVO_DROP_POS  110  // Degrees: Pin retracted (Releasing payload)
+// Safe pulse limits for PZ-15320 micro servo:
+// 1000us - 2000us prevents ramming into mechanical end-stops
+#define SERVO_MIN_US     1000
+#define SERVO_MAX_US     2000
+
+// Safe angles: kept away from 0 and 180 to prevent mechanical stall
+#define SERVO_LOCK_POS   30   // Degrees: Latch engaged
+#define SERVO_DROP_POS  120   // Degrees: Latch released
 
 // ==========================================
 // BLE NORDIC UART UUIDs
@@ -27,25 +32,42 @@ BLEServer *pServer = NULL;
 BLECharacteristic *pTxCharacteristic = NULL;
 bool deviceConnected = false;
 
-// Trigger drop sequence
-void triggerDrop() {
-    Serial.println("[DROP] Releasing payload...");
-    digitalWrite(ONBOARD_LED_PIN, LOW); // Turn on LED during drop (Active LOW on Super Mini)
+// ==========================================
+// THERMAL PROTECTION FUNCTION:
+// Moves the servo and IMMEDIATELY DETACHES
+// ==========================================
+void moveServoSafely(int angle, int settleTimeMs = 500) {
+    Serial.printf("[SERVO] Moving to %d deg...\n", angle);
     
-    dropServo.write(SERVO_DROP_POS);
-    delay(1500); // Hold open to let string/ring fall clear
+    // 1. Attach with safe pulse limits
+    dropServo.attach(SERVO_PIN, SERVO_MIN_US, SERVO_MAX_US);
+    dropServo.write(angle);
+    delay(settleTimeMs); // Allow time to reach target position
 
-    dropServo.write(SERVO_LOCK_POS);
-    digitalWrite(ONBOARD_LED_PIN, HIGH); // Turn off LED
-    Serial.println("[DROP] Servo reset to lock position.");
+    // 2. CRITICAL: Detach PWM so the micro motor turns OFF completely
+    // This stops stall current and keeps the servo cold!
+    dropServo.detach();
+    Serial.println("[SERVO] Detached (0mA standby current - cold).");
 }
 
-// Server connection callbacks
+void triggerDrop() {
+    Serial.println("[DROP] Releasing payload...");
+    digitalWrite(ONBOARD_LED_PIN, LOW); // LED ON
+    
+    // 1. Move to release position, wait 1.2s for string/ring to fall
+    moveServoSafely(SERVO_DROP_POS, 1200);
+
+    // 2. Return to lock position and power off
+    moveServoSafely(SERVO_LOCK_POS, 500);
+
+    digitalWrite(ONBOARD_LED_PIN, HIGH); // LED OFF
+    Serial.println("[DROP] Sequence completed.");
+}
+
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
         deviceConnected = true;
         Serial.println("[BLE] iPhone connected!");
-        // Blink LED twice to confirm connection
         for (int i = 0; i < 2; i++) {
             digitalWrite(ONBOARD_LED_PIN, LOW);
             delay(100);
@@ -61,10 +83,8 @@ class MyServerCallbacks: public BLEServerCallbacks {
     }
 };
 
-// Characteristic write callbacks (incoming commands from iPhone)
 class MyCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-        // Universal string handling compatible with both ESP32 Arduino Core 2.x and 3.x
         String rxValue = String(pCharacteristic->getValue().c_str());
         rxValue.trim();
 
@@ -80,13 +100,11 @@ class MyCallbacks: public BLECharacteristicCallbacks {
                 triggerDrop();
             } 
             else if (rxValue.equalsIgnoreCase("LOCK") || rxValue.equals("0")) {
-                dropServo.write(SERVO_LOCK_POS);
-                Serial.println("[SERVO] Manually set to LOCK");
+                moveServoSafely(SERVO_LOCK_POS, 500);
             }
             else if (rxValue.equalsIgnoreCase("TEST")) {
-                dropServo.write(SERVO_DROP_POS);
-                delay(800);
-                dropServo.write(SERVO_LOCK_POS);
+                moveServoSafely(SERVO_DROP_POS, 800);
+                moveServoSafely(SERVO_LOCK_POS, 500);
             }
         }
     }
@@ -95,47 +113,42 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 void setup() {
     Serial.begin(115200);
     delay(500);
-    Serial.println("\n=== Tello Drop System Initializing ===");
+    Serial.println("\n=== Tello Drop System (Thermal-Protected) ===");
 
-    // Onboard LED setup
     pinMode(ONBOARD_LED_PIN, OUTPUT);
-    digitalWrite(ONBOARD_LED_PIN, HIGH); // Off initially
+    digitalWrite(ONBOARD_LED_PIN, HIGH);
 
-    // Initialize Servo
+    // Initialize Timer
     ESP32PWM::allocateTimer(0);
-    dropServo.setPeriodHertz(50); // Standard 50Hz PWM
-    dropServo.attach(SERVO_PIN, 500, 2400); // 500us - 2400us pulse
-    dropServo.write(SERVO_LOCK_POS);
-    Serial.println("[SERVO] Attached to GPIO 4 (Locked)");
+    dropServo.setPeriodHertz(50);
 
-    // Initialize BLE Device
+    // Initial safe lock position, then immediately shut down motor
+    moveServoSafely(SERVO_LOCK_POS, 500);
+
+    // Initialize BLE
     BLEDevice::init("TelloDropSystem");
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
 
-    // Create Service
     BLEService *pService = pServer->createService(SERVICE_UUID);
 
-    // TX Characteristic (Notify iPhone)
     pTxCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID_TX,
         BLECharacteristic::PROPERTY_NOTIFY
     );
     pTxCharacteristic->addDescriptor(new BLE2902());
 
-    // RX Characteristic (Receive commands from iPhone)
     BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID_RX,
         BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
     );
     pRxCharacteristic->setCallbacks(new MyCallbacks());
 
-    // Start Service & Advertising
     pService->start();
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06); // Functions that help with iPhone connections
+    pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
     pAdvertising->start();
 
